@@ -228,7 +228,7 @@ let heapBusy = false;
 let lastHeapAt = 0;
 
 // 零痕迹内存提取：进程外 ReadProcessMemory 扫 worldKey 并解密 level.dat（HuntKey.exe）。
-// 不 attach、不加载 agent、不写游戏文件 → latest.log 零痕迹。较慢（全内存扫描，分钟级）。
+// 不注入游戏进程、不写游戏文件 → 游戏日志无痕。通常 1 秒内完成。
 function huntSeed(worldDir) {
   try {
     const pid = findMcPid();

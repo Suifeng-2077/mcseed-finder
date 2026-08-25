@@ -1,7 +1,7 @@
 # MC Seed Finder
 
 > Minecraft 1.16.1 种子(Seed)捕获器 — 创建/重置新世界后，立刻告诉你这个世界的种子。
-> 完全本地运行，零外部依赖，纯文件读取 + 零痕迹内存扫描，反作弊日志不可见。
+> 完全本地运行，零外部依赖，纯文件读取 + 零痕迹内存扫描，不改变游戏、日志无痕。
 
 [English](#english) · [中文](#chinese)
 
@@ -9,14 +9,14 @@
 
 ### 这是什么
 
-一个在本地命令行运行的小工具：当你创建/重置新的 Minecraft 世界时，立刻显示这个世界的种子(seed)。适用于 Minecraft 1.16.1 + mcsrfairplay 反作弊整合包。
+一个在本地命令行运行的小工具：当你创建/重置新的 Minecraft 世界时，立刻显示这个世界的种子(seed)。适用于 Minecraft 1.16.1 + mcsrfairplay 整合包。
 
 - ✅ **零外部依赖**：纯本地 Node.js 程序，不需要任何在线服务
 - ✅ **三种取 seed 方式**，自动择优：
   1. `plain` 明文直读（level.dat 是明文 gzip）
   2. `enc` 密钥文件解密（读 worldDataKey.txt）
   3. `hunt` 零痕迹内存扫描（进程外 ReadProcessMemory，加密世界运行中 1 秒内出结果）
-- ✅ **反作弊不可见**：所有方式都不注入游戏、不加载 agent、不改游戏文件、不在游戏日志留痕迹
+- ✅ **不改变游戏**：所有方式都不注入游戏、不加载额外组件、不改游戏文件、日志无痕
 
 ### 版本要求（重要）
 
@@ -89,7 +89,7 @@ A local command-line tool that shows the seed of a newly created/reset Minecraft
 
 - Zero external dependencies (pure Node.js)
 - Three extraction methods, auto-selected: plaintext / key-file / zero-trace memory scan
-- Invisible to anti-cheat: never injects, never loads an agent, never modifies game files, leaves no trace in game logs
+- Non-intrusive: never injects, never loads extra components, never modifies game files, leaves no trace in game logs
 
 **Requirements**: Minecraft 1.16.1 + mcsrfairplay 1.2.1 + Node.js (LTS).
 
