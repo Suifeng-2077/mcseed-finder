@@ -1,0 +1,19 @@
+# 运行时产物（不要提交）
+mcseed-app/tmp/
+mcseed-app/seeds.log
+mcseed-app/state.json
+mcseed-app/watch.lock
+mcseed-app/sniff.log
+
+# Node
+node_modules/
+npm-debug.log*
+
+# 系统
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# 备份/临时
+*.bak
+*.tmp
