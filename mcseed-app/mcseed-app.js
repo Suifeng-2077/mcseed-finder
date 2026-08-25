@@ -119,15 +119,41 @@ function worldKeyForDir(dir, name) {
   return 'name:' + name;
 }
 const seen = new Set();
+// 加载 state：兼容两种格式——
+//   1) 行式（每行一个 key，append-only，增量写）
+//   2) 旧的 JSON 对象格式（兼容升级）
 try {
-  const s = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
-  for (const k of Object.keys(s)) seen.add(k);
+  const raw = fs.readFileSync(STATE_PATH, 'utf8').trim();
+  if (raw.startsWith('{')) {
+    const s = JSON.parse(raw);
+    for (const k of Object.keys(s)) seen.add(k);
+  } else {
+    for (const line of raw.split('\n')) {
+      const k = line.trim();
+      if (k) seen.add(k);
+    }
+  }
 } catch (e) { /* first run */ }
-function persistState() {
+
+// 增量写 state：只把新增的 key 追加到文件尾部，避免每次全量重写。
+// 首次捕获时写一个完整行式文件（含已有 key），之后新 key 逐行追加。
+// 兼容旧 JSON 格式：若原文件是 JSON，首次持久化时先转成行式完整写。
+let stateFileExists = fs.existsSync(STATE_PATH);
+let stateWasJson = false;
+try { if (stateFileExists && fs.readFileSync(STATE_PATH, 'utf8').trim().startsWith('{')) stateWasJson = true; } catch (e) {}
+function persistState(newKey) {
   try {
-    const o = {};
-    for (const k of seen) o[k] = { key: k };
-    fs.writeFileSync(STATE_PATH, JSON.stringify(o));
+    if (!stateFileExists || stateWasJson) {
+      // 首次 / 从 JSON 迁移：把当前所有 key 写成一个完整行式文件
+      const lines = [];
+      for (const k of seen) lines.push(k);
+      fs.writeFileSync(STATE_PATH, lines.join('\n') + '\n');
+      stateFileExists = true;
+      stateWasJson = false;
+      return;
+    }
+    // 增量：追加单个新增 key（避免扫描整个 seen）
+    if (newKey) fs.appendFileSync(STATE_PATH, newKey + '\n');
   } catch (e) { /* ignore */ }
 }
 
@@ -228,7 +254,7 @@ let heapBusy = false;
 let lastHeapAt = 0;
 
 // 零痕迹内存提取：进程外 ReadProcessMemory 扫 worldKey 并解密 level.dat（HuntKey.exe）。
-// 不注入游戏进程、不写游戏文件 → 游戏日志无痕。通常 1 秒内完成。
+// 不 attach、不加载 agent、不写游戏文件 → latest.log 零痕迹。较慢（全内存扫描，分钟级）。
 function huntSeed(worldDir) {
   try {
     const pid = findMcPid();
@@ -286,7 +312,7 @@ async function captureOne(dirPath, name, firstScan) {
   if (!res) return false;
   const wkey = worldKeyForDir(dirPath, name);
   seen.add(wkey);
-  persistState();
+  persistState(wkey);
   const line = [new Date().toISOString(), firstScan ? 'init' : 'new', res.mode, name, res.levelName || '', res.seed].join('\t');
   log(line);
   notifyNewWorld(name, res.seed, !firstScan);
