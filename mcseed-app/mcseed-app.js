@@ -349,7 +349,7 @@ async function watchLoop() {
         console.log('[' + new Date().toLocaleTimeString() + '] 运行中... 已捕获 ' + seen.size + ' 个世界 (日志: ' + LOG_PATH + ')');
       }
     } catch (e) {
-      console.error('[mcseed] watch 错误: ' + e.message);
+      console.error('[mcseed] 监听遇到错误，继续运行：' + (e && e.message ? e.message : e));
     } finally {
       scanning = false;
     }
@@ -379,7 +379,11 @@ async function nowMode() {
     log([new Date().toISOString(), 'now', res.mode, name, res.levelName || '', res.seed].join('\t'));
     beep();
   } else {
-    console.log('[mcseed] 未能获取 seed（游戏可能未运行）');
+    console.log('未能获取 [' + name + '] 的 seed。');
+    console.log('  可能原因：');
+    console.log('  - 游戏未运行：请先启动 Minecraft 游戏再试（加密世界需要从游戏内存读取）。');
+    console.log('  - 这个世界的 seed 可能还没准备好：过几秒再试，或稍后重试。');
+    console.log('  - 若持续失败，请检查游戏整合包是否为 1.16.1 + mcsrfairplay 1.2.1。');
   }
 }
 
@@ -440,7 +444,10 @@ async function nextMode() {
       beep();
       log([new Date().toISOString(), 'next', res.mode, next, res.levelName || '', res.seed].join('\t'));
     } else {
-      console.log('  未能获取 ' + next + ' 的 seed（密钥可能还没就绪，稍后按 Enter 重试）');
+      console.log('  未能获取 [' + next + '] 的 seed。');
+      console.log('  可能原因：游戏未运行 / seed 尚未就绪。');
+      console.log('  请确认游戏已打开，按 Enter 再试一次。');
+      console.log('  若持续失败，检查整合包是否为 1.16.1 + mcsrfairplay 1.2.1。');
     }
   }
 }
@@ -475,8 +482,25 @@ if (mode === 'watch') {
   } catch (e) { /* lock best-effort */ }
 }
 
-if (mode === 'watch') watchLoop().catch((e) => console.error(e));
-else if (mode === 'now') { if (!ensureSavesDir()) process.exit(1); nowMode().catch((e) => console.error(e)); }
-else if (mode === 'next') { if (!ensureSavesDir()) process.exit(1); nextMode().catch((e) => console.error(e)); }
+if (mode === 'watch') watchLoop().catch((e) => friendlyError('监听', e));
+else if (mode === 'now') { if (!ensureSavesDir()) process.exit(1); nowMode().catch((e) => friendlyError('获取当前世界', e)); }
+else if (mode === 'next') { if (!ensureSavesDir()) process.exit(1); nextMode().catch((e) => friendlyError('等待新世界', e)); }
 else if (mode === 'show') showMode();
 else console.log('用法: node mcseed-app.js [watch|now|next|show]');
+
+// 把未捕获的异常转成友好中文提示 + 常见原因，避免直接抛英文堆栈。
+function friendlyError(action, e) {
+  const msg = (e && e.message) ? String(e.message) : String(e);
+  console.error('');
+  console.error('[' + action + '] 出错了：');
+  console.error('  ' + msg);
+  console.error('');
+  console.error('  可能原因与排查：');
+  if (/ENOENT|no such file/i.test(msg)) console.error('  - 找不到文件/目录。请确认游戏已启动、存档目录存在。');
+  else if (/EACCES|permission|denied/i.test(msg)) console.error('  - 没有读写权限。请以管理员身份运行 cmd，或检查文件是否被占用。');
+  else if (/ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/i.test(msg)) console.error('  - 网络连接问题。如果你在用代理，请确认代理软件已开启。');
+  else if (/heap|dump|OpenProcess|jps/i.test(msg)) console.error('  - 内存/进程相关。请确认 Minecraft 游戏正在运行，或稍后重试。');
+  else console.error('  - 请把上面这段错误信息截图，反馈给作者排查。');
+  console.error('');
+  if (process.env.DSH_MCSEED_DEBUG === '1') console.error(e && e.stack ? e.stack : e);
+}
