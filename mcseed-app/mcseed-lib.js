@@ -229,29 +229,80 @@
 
   // ---------- seed extraction ----------
   // 1.16+: Data.WorldGenSettings.seed (Long).  Pre-1.16: Data.RandomSeed (Long).
+  // 少数整合包会把 seed 换成 TAG_String（十进制或 base64 占位串），也要能识别，
+  // 否则解析成功却被当成"没有 seed"，上层只能静默失败。
+  function decodeBase64(s) {
+    try {
+      if (typeof Buffer === 'function' && typeof Buffer.from === 'function') {
+        const b = Buffer.from(s, 'base64');
+        return b.length > 0 ? b : null;
+      }
+    } catch (e) { /* fallthrough */ }
+    try {
+      if (typeof atob === 'function') {
+        const bin = atob(s);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        return arr.length > 0 ? arr : null;
+      }
+    } catch (e) { /* fallthrough */ }
+    return null;
+  }
+
   function extractSeed(nbt) {
     const data = nbt && nbt.value && nbt.value.Data;
     if (!data || typeof data !== 'object') return null;
-    let seed = null;
-    if (data.WorldGenSettings && data.WorldGenSettings.seed &&
-        typeof data.WorldGenSettings.seed === 'object' && data.WorldGenSettings.seed.hi !== undefined) {
-      seed = data.WorldGenSettings.seed;
-    } else if (data.RandomSeed && typeof data.RandomSeed === 'object' && data.RandomSeed.hi !== undefined) {
-      seed = data.RandomSeed;
+
+    let raw = null;
+    let field = null;
+    if (data.WorldGenSettings && typeof data.WorldGenSettings === 'object' &&
+        data.WorldGenSettings.seed !== undefined) {
+      raw = data.WorldGenSettings.seed;
+      field = 'WorldGenSettings.seed';
+    } else if (data.RandomSeed !== undefined) {
+      raw = data.RandomSeed;
+      field = 'RandomSeed';
     }
-    if (!seed) return null;
-    const hasBigInt = typeof BigInt === 'function';
-    let dec = null;
-    let num = null;
-    if (hasBigInt) {
-      const full = (BigInt(seed.hi) << 32n) + BigInt(seed.lo >>> 0);
-      dec = full.toString();
-      if (full >= -9007199254740991n && full <= 9007199254740991n) num = Number(full);
-    } else {
-      dec = String(seed.lo);
-      if (seed.hi === 0) num = seed.lo >>> 0;
+    if (raw === null || raw === undefined) return null;
+
+    // 常规形态：TAG_Long -> {hi, lo}
+    if (typeof raw === 'object' && raw !== null && raw.hi !== undefined) {
+      const hasBigInt = typeof BigInt === 'function';
+      let dec = null;
+      let num = null;
+      if (hasBigInt) {
+        const full = (BigInt(raw.hi) << 32n) + BigInt(raw.lo >>> 0);
+        dec = full.toString();
+        if (full >= -9007199254740991n && full <= 9007199254740991n) num = Number(full);
+      } else {
+        dec = String(raw.lo);
+        if (raw.hi === 0) num = raw.lo >>> 0;
+      }
+      return { hi: raw.hi, lo: raw.lo, dec: dec, num: num, kind: 'long', field: field, opaque: false };
     }
-    return { hi: seed.hi, lo: seed.lo, dec: dec, num: num };
+
+    // 非预期形态：TAG_String。十进制仍可当种子用；base64/其它形态属于不透明占位，
+    // 上层据此给出"磁盘上没有真实 seed"的明确提示，而不是把它当作读取失败。
+    if (typeof raw === 'string') {
+      const s = raw.trim();
+      const out = { hi: null, lo: null, dec: s, num: null, kind: 'string', field: field, opaque: true };
+      if (/^-?\d+$/.test(s)) {
+        out.opaque = false;
+        const n = Number(s);
+        out.num = Number.isFinite(n) && Math.abs(n) <= 9007199254740991 ? n : null;
+      } else {
+        const bin = decodeBase64(s);
+        if (bin) {
+          out.rawLen = bin.length;
+          out.rawHex = Array.prototype.map.call(bin, function (x) {
+            return ('0' + x.toString(16)).slice(-2);
+          }).join('');
+        }
+      }
+      return out;
+    }
+
+    return null;
   }
 
   function extractLevelName(nbt) {

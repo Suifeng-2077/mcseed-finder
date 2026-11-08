@@ -1,0 +1,18 @@
+{
+  "name": "mcseed-finder",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Minecraft 1.16.1 世界 seed 捕获器：读取 fairplay 加密存档 / 明文存档，零注入、不写游戏文件",
+  "main": "mcseed-app/mcseed-app.js",
+  "scripts": {
+    "test": "node --test test/mcseed.test.js",
+    "now": "node mcseed-app/mcseed-app.js now",
+    "watch": "node mcseed-app/mcseed-app.js watch",
+    "next": "node mcseed-app/mcseed-app.js next",
+    "show": "node mcseed-app/mcseed-app.js show"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "MIT"
+}
