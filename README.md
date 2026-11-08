@@ -6,6 +6,7 @@
 
 纯本地 · 零依赖 · 不注入游戏 · 游戏日志无痕
 
+[![Release](https://img.shields.io/github/v/release/Suifeng-2077/mcseed-finder?style=flat-square&color=3da639)](https://github.com/Suifeng-2077/mcseed-finder/releases/latest)
 ![License](https://img.shields.io/badge/license-MIT-3da639?style=flat-square)
 ![Node](https://img.shields.io/badge/node-%E2%89%A516-43853d?style=flat-square&logo=nodedotjs&logoColor=white)
 ![Minecraft](https://img.shields.io/badge/minecraft-1.16.1-62B47A?style=flat-square)
@@ -58,10 +59,13 @@ flowchart TD
 
 ## 快速开始
 
-```bash
-# 1. 装 Node.js（LTS），解压本仓库
-# 2. 先启动游戏（进到能创建/重置世界的界面）
-# 3. 双击 mcseed-app/ 里的脚本
+**[⬇ 下载最新发布版](https://github.com/Suifeng-2077/mcseed-finder/releases/latest)**（`mcseed-finder-x.y.z.zip`，解压即用）
+
+```text
+1. 装 Node.js（LTS）
+2. 解压发布包
+3. 先启动游戏（进到能创建/重置世界的界面）
+4. 双击 mcseed-app/ 里的脚本
 ```
 
 | 想做什么 | 双击 |
@@ -267,7 +271,9 @@ flowchart TD
 
 ## Quick start
 
-Install Node.js (LTS), extract the repo, start the game, then double-click a script in `mcseed-app/`:
+**[⬇ Download the latest release](https://github.com/Suifeng-2077/mcseed-finder/releases/latest)** (unzip and run).
+
+Install Node.js (LTS), extract, start the game, then double-click a script in `mcseed-app/`:
 
 | Goal | Script |
 |---|---|
