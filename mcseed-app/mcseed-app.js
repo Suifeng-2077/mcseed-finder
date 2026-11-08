@@ -767,7 +767,12 @@ function pushRecent(rec) {
   if (recent.length > 50) recent.shift();
   const payload = 'data: ' + JSON.stringify(rec) + '\n\n';
   for (const c of sseClients) {
-    try { c.write(payload); } catch (e) { /* client gone */ }
+    try {
+      c.write(payload);
+    } catch (e) {
+      // 客户端已断开：从集合里摘掉，否则长跑会累积死连接
+      sseClients.delete(c);
+    }
   }
 }
 // 虚拟网卡名字特征：Radmin VPN、加速器 TAP、虚拟机、容器、overlay 网络等。
@@ -1018,12 +1023,16 @@ const PHONE_HTML = [
   'if(ht){listEl.classList.toggle("hide");return}',
   'var el=e.target.closest("[data-seed]");if(!el)return;var s=el.getAttribute("data-seed");',
   'if(s)copy(s)});',
+  'function merge(incoming){var seen={},out=[];',
+  '(items||[]).forEach(function(r){var k=r.time+"|"+r.seed;if(!seen[k]){seen[k]=1;out.push(r)}});',
+  '(incoming||[]).forEach(function(r){var k=r.time+"|"+r.seed;if(!seen[k]){seen[k]=1;out.push(r)}});',
+  'out.sort(function(a,b){return a.time<b.time?1:(a.time>b.time?-1:0)});items=out.slice(0,30)}',
   'function load(){fetch("/api/recent?t="+encodeURIComponent(T)).then(function(r){return r.json()})',
-  '.then(function(j){items=j.items||[];render(false);',
+  '.then(function(j){merge(j.items);render(false);',
   'setState(true,"已同步 "+hm(new Date()))}).catch(function(){setState(false,"离线 · 重试中")})}',
   'load();',
   'try{var es=new EventSource("/events?t="+encodeURIComponent(T));',
-  'es.onopen=function(){setState(true,"实时连接")};',
+  'es.onopen=function(){setState(true,"实时连接");load()};',
   'es.onmessage=function(e){try{var r=JSON.parse(e.data);items.unshift(r);items=items.slice(0,30);',
   'render(true);flash();if(navigator.vibrate)navigator.vibrate([22,32,22])}catch(x){}};',
   'es.onerror=function(){setState(false,"断线 · 轮询中")}}catch(x){}',
@@ -1068,6 +1077,18 @@ function startPhoneServer(port, token, bind) {
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://localhost');
     const q = u.searchParams.get('t') || '';
+    if (u.pathname === '/icon-192.png') {
+      const iconPath = path.join(__dirname, 'icon-192.png');
+      try {
+        const buf = fs.readFileSync(iconPath);
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });
+        res.end(buf);
+      } catch (e) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('no icon');
+      }
+      return;
+    }
     if (token && q !== token) {
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('forbidden');
@@ -1093,7 +1114,11 @@ function startPhoneServer(port, token, bind) {
         background_color: '#0b0e12',
         theme_color: '#0b0e12',
         start_url: './?t=' + encodeURIComponent(token),
-        icons: [{ src: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj48cmVjdCB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgcng9IjQ0IiBmaWxsPSIjMTAxNTFiIi8+PHBhdGggZD0iTTM0IDEyNGgyMmwxNi01OCAyNiA5OCAyMC03NCAxMiAzNGgyMiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjNWZlMzliIiBzdHJva2Utd2lkdGg9IjExIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+        scope: './',
+        icons: [
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+        ],
       }));
       return;
     }
@@ -1111,12 +1136,25 @@ function startPhoneServer(port, token, bind) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('not found');
   });
-  server.on('error', (e) => {
-    console.error('[mcseed] 手机看板启动失败：' + (e && e.message ? e.message : e));
-  });
   const host = bind || '0.0.0.0';
+  let listenTries = 0;
+  server.on('error', (e) => {
+    const code = e && e.code;
+    if (code === 'EADDRINUSE' && listenTries < 5) {
+      listenTries++;
+      const nextPort = port + listenTries;
+      console.log('[mcseed] 端口 ' + (port + listenTries - 1) + ' 被占用，改用 ' + nextPort);
+      setTimeout(() => server.listen(nextPort, host), 150);
+      return;
+    }
+    console.error('[mcseed] 手机看板启动失败：' + (e && e.message ? e.message : e));
+    if (code === 'EADDRINUSE') console.error('    提示：换一个端口，例如 --http 8791');
+    if (code === 'EACCES') console.error('    提示：该端口需要更高权限，换 1024 以上端口');
+  });
   server.listen(port, host, () => {
-    printAccessInfo(port, token, host);
+    // 自动换过端口时，打印的必须是实际监听端口，否则手机会连到被占用的那个
+    const actualPort = (server.address() && server.address().port) || port;
+    printAccessInfo(actualPort, token, host);
     console.log('    手机与电脑连同一个 WiFi / 热点即可；不要把端口映射到公网。');
     // 换网络（热点 <-> WiFi）、DHCP 续租都会让地址变化，变了就把新地址和二维码重新贴出来。
     let lastUrl = '';
@@ -1129,7 +1167,7 @@ function startPhoneServer(port, token, bind) {
       lastUrl = addr;
       console.log('');
       console.log('[mcseed] 网络地址变了，新的访问地址：');
-      printAccessInfo(port, token, host);
+      printAccessInfo(actualPort, token, host);
     }, 30000);
     watcher.unref();
   });
@@ -1160,8 +1198,21 @@ if (mode === 'watch') {
 
 // 手机看板（可选）：--http <端口> 开启，默认不监听任何端口。
 const PHONE_PORT = parseInt(argValue('--http'), 10);
-const PHONE_TOKEN = argValue('--http-token') ||
-  Math.random().toString(36).slice(2, 8);
+// 未显式指定 token 时，把随机值缓存到文件复用：否则每次重启看板 token 都变，
+// 手机书签/主屏幕图标会全部失效。
+const TOKEN_CACHE = path.join(__dirname, '.phone-token');
+function phoneToken() {
+  const given = argValue('--http-token');
+  if (given) return given;
+  try {
+    const saved = fs.readFileSync(TOKEN_CACHE, 'utf8').trim();
+    if (/^[A-Za-z0-9_-]{4,32}$/.test(saved)) return saved;
+  } catch (e) { /* 首次运行 */ }
+  const fresh = Math.random().toString(36).slice(2, 8);
+  try { fs.writeFileSync(TOKEN_CACHE, fresh); } catch (e) { /* 只读目录就算了 */ }
+  return fresh;
+}
+const PHONE_TOKEN = phoneToken();
 if (Number.isFinite(PHONE_PORT) && PHONE_PORT > 0) {
   loadRecentFromLog(20);
   startPhoneServer(PHONE_PORT, PHONE_TOKEN, argValue('--http-bind'));

@@ -17,3 +17,5 @@ desktop.ini
 # 备份/临时
 *.bak
 *.tmp
+
+mcseed-app/.phone-token
