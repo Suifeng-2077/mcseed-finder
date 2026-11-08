@@ -14,6 +14,7 @@ const os = require('os');
 const http = require('http');
 const { execFile, execFileSync, spawn } = require('child_process');
 const lib = require('./mcseed-lib.js');
+const qr = require('./mcseed-qr.js');
 const crypto = require('./mcseed-crypto.js');
 
 // ---------- config ----------
@@ -31,7 +32,7 @@ function argValue(name) {
   return i >= 0 && i + 1 < ARGV.length ? ARGV[i + 1] : null;
 }
 // 取模式参数时必须跳过 "--flag value" 里的 value，否则 `--saves D:\x now` 会把路径当模式。
-const VALUE_FLAGS = ['--saves', '--log', '--state', '--retry', '--retry-ms', '--poll'];
+const VALUE_FLAGS = ['--saves', '--log', '--state', '--retry', '--retry-ms', '--poll', '--http', '--http-token', '--http-bind'];
 function parseMode() {
   for (let i = 0; i < ARGV.length; i++) {
     const a = ARGV[i];
@@ -552,6 +553,8 @@ async function captureOne(dirPath, name, firstScan) {
   if (!res && allowHunt && AUTO_HEAP && st === 'key-nokey') {
     // 冷却期内不算失败：否则会被 failCount 推成 abandoned，等冷却过了永远不再尝试。
     if (Date.now() - lastHeapAt <= HEAP_COOLDOWN_MS) return 'idle';
+    // 游戏没在跑就没有堆可扫，直接等下次，别把世界刷成 fail。
+    if (!findMcPid()) return 'idle';
     res = await heapExtract(dirPath);
     if (res) lastHeapAt = Date.now();
   }
@@ -767,17 +770,36 @@ function pushRecent(rec) {
     try { c.write(payload); } catch (e) { /* client gone */ }
   }
 }
+// 虚拟网卡名字特征：Radmin VPN、加速器 TAP、虚拟机、容器、overlay 网络等。
+// 这些地址手机连不上，旧版会把它们一起打印出来，反而让人选错。
+const VIRTUAL_IFACE = /radmin|tap|tun|virtual|vethernet|vmware|virtualbox|docker|hyper-v|loopback|tailscale|zerotier|hamachi|wsl/i;
+const REAL_IFACE = /wi-?fi|wlan|wireless|无线|ethernet|以太网|en\d|eth\d/i;
+
+// 返回按「适合手机访问」排序的候选地址，第一项即推荐值。
 function lanAddresses() {
-  const out = [];
+  const real = [];
+  const other = [];
   try {
     const ifs = os.networkInterfaces();
     for (const name of Object.keys(ifs)) {
+      const isVirtual = VIRTUAL_IFACE.test(name);
+      const looksReal = REAL_IFACE.test(name);
       for (const a of ifs[name] || []) {
-        if (a.family === 'IPv4' && !a.internal) out.push(a.address);
+        if (a.family !== 'IPv4' || a.internal) continue;
+        if (a.address.startsWith('169.254.')) continue; // 链路本地，不可达
+        const rec = { address: a.address, iface: name };
+        if (isVirtual) other.push(rec);
+        else if (looksReal) real.unshift(rec);
+        else real.push(rec);
       }
     }
   } catch (e) { /* ignore */ }
-  return out;
+  return real.concat(other);
+}
+
+function preferredAddress() {
+  const list = lanAddresses();
+  return list.length ? list[0] : null;
 }
 
 // 手机打开页面时要立刻有东西看：从日志尾部回填最近几条（不回填的话，历史世界
@@ -1010,7 +1032,39 @@ const PHONE_HTML = [
   '</script></body></html>',
 ].join('\n');
 
-function startPhoneServer(port, token) {
+function printAccessInfo(port, token, bind) {
+  const list = lanAddresses();
+  const local = bind && bind !== '0.0.0.0' ? bind : (list.length ? list[0].address : null);
+  if (bind === '127.0.0.1') {
+    console.log('[mcseed] 手机看板只绑定本机回环地址。');
+    console.log('    走 USB 隧道时这样用：');
+    console.log('      adb reverse tcp:' + port + ' tcp:' + port);
+    console.log('      手机浏览器打开  http://127.0.0.1:' + port + '/?t=' + token);
+    return;
+  }
+  if (!local) {
+    console.log('[mcseed] 未发现可用的局域网地址（没连 WiFi / 热点？）');
+    return;
+  }
+  const url = 'http://' + local + ':' + port + '/?t=' + token;
+  console.log('[mcseed] 手机看板已开启');
+  console.log('    手机（安卓）浏览器打开：  ' + url);
+  const art = qr.toTerminal(url);
+  if (art) {
+    console.log('    或用相机 / 微信扫码：');
+    console.log(art);
+  } else {
+    console.log('    （地址过长，未生成二维码，直接手输上面的地址）');
+  }
+  const rest = list.filter((x) => x.address !== local);
+  if (rest.length) {
+    console.log('    其它网卡（手机多半连不上，忽略即可）：' +
+      rest.map((x) => x.address + ' [' + x.iface + ']').join('、'));
+  }
+  if (bind && bind !== '0.0.0.0') console.log('    已绑定指定地址：' + bind);
+}
+
+function startPhoneServer(port, token, bind) {
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://localhost');
     const q = u.searchParams.get('t') || '';
@@ -1060,12 +1114,24 @@ function startPhoneServer(port, token) {
   server.on('error', (e) => {
     console.error('[mcseed] 手机看板启动失败：' + (e && e.message ? e.message : e));
   });
-  server.listen(port, '0.0.0.0', () => {
-    const ips = lanAddresses();
-    console.log('[mcseed] 手机看板已开启（局域网）：');
-    for (const ip of ips) console.log('    http://' + ip + ':' + port + '/?t=' + token);
-    if (ips.length === 0) console.log('    http://127.0.0.1:' + port + '/?t=' + token + '  (未发现局域网网卡)');
-    console.log('    手机连同一个 WiFi，浏览器打开上面的地址即可；不要把这个端口映射到公网。');
+  const host = bind || '0.0.0.0';
+  server.listen(port, host, () => {
+    printAccessInfo(port, token, host);
+    console.log('    手机与电脑连同一个 WiFi / 热点即可；不要把端口映射到公网。');
+    // 换网络（热点 <-> WiFi）、DHCP 续租都会让地址变化，变了就把新地址和二维码重新贴出来。
+    let lastUrl = '';
+    const cur = preferredAddress();
+    lastUrl = cur ? cur.address : '';
+    const watcher = setInterval(() => {
+      const now = preferredAddress();
+      const addr = now ? now.address : '';
+      if (addr === lastUrl) return;
+      lastUrl = addr;
+      console.log('');
+      console.log('[mcseed] 网络地址变了，新的访问地址：');
+      printAccessInfo(port, token, host);
+    }, 30000);
+    watcher.unref();
   });
   return server;
 }
@@ -1098,7 +1164,7 @@ const PHONE_TOKEN = argValue('--http-token') ||
   Math.random().toString(36).slice(2, 8);
 if (Number.isFinite(PHONE_PORT) && PHONE_PORT > 0) {
   loadRecentFromLog(20);
-  startPhoneServer(PHONE_PORT, PHONE_TOKEN);
+  startPhoneServer(PHONE_PORT, PHONE_TOKEN, argValue('--http-bind'));
 }
 
 if (mode === 'watch') watchLoop().catch((e) => friendlyError('监听', e));

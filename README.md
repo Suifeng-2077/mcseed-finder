@@ -111,6 +111,7 @@ node mcseed-app.js show      # 最近 10 条捕获记录
 | `--poll <ms>` | 扫描间隔，默认 1200；想更快用 250 |
 | `--retry <n>` / `--retry-ms <ms>` | 等 `worldDataKey.txt` 落盘的次数与间隔 |
 | `--http <端口>` / `--http-token <口令>` | 开启手机看板 |
+| `--http-bind <地址>` | 指定绑定的网卡地址；`127.0.0.1` 用于 USB 隧道 |
 | `--no-heap` | 禁用内存扫描，只用文件 |
 | `--log <文件>` / `--state <文件>` | 指定日志与去重状态 |
 
